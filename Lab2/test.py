@@ -75,7 +75,7 @@ lower = Lower()
 upper = Upper()
 
 # Generate mesh (examples with and without a hole in the mesh) 
-resolution = 32
+resolution = 100
 #mesh = RectangleMesh(Point(0.0, 0.0), Point(L, H), L*resolution, H*resolution)
 mesh = generate_mesh(Rectangle(Point(0.0,0.0), Point(L,H)) - Circle(Point(xc,yc),rc), resolution)
 
@@ -105,7 +105,7 @@ plt.show()
 #%%
 
 
-def simulate(U, nu, mesh, Tmax, uinit=None, pinit=None, tinit=0.0):
+def simulate(U, nu, mesh, Tmax, uinit=None, pinit=None, tinit=0.0, SDstab=False):
     # Generate finite element spaces (for velocity and pressure)
     V = VectorFunctionSpace(mesh, "Lagrange", 1)
     Q = FunctionSpace(mesh, "Lagrange", 1)
@@ -192,24 +192,38 @@ def simulate(U, nu, mesh, Tmax, uinit=None, pinit=None, tinit=0.0):
     # Define variational problem
 
     # Stabilization parameters
-    h = CellDiameter(mesh);
+    h = CellDiameter(mesh)
     u_mag = sqrt(dot(u1,u1))
-    d1 = 1.0/sqrt((pow(1.0/dt,2.0) + pow(u_mag/h,2.0)))
-    d2 = h*u_mag
 
     # Mean velocities for trapozoidal time stepping
     um = 0.5*(u + u0)
     um1 = 0.5*(u1 + u0)
 
-    # Momentum variational equation on residual form
-    Fu = inner((u - u0)/dt + grad(um)*um1, v)*dx - p1*div(v)*dx + nu*inner(grad(um), grad(v))*dx \
-        + d1*inner((u - u0)/dt + grad(um)*um1 + grad(p1), grad(v)*um1)*dx + d2*div(um)*div(v)*dx 
+    if(SDstab):
+        d1 = 0.17/sqrt(1/dt**2 + u_mag**2/h**2)
+        d2 = 0.17*h
+
+        # Momentum variational equation on residual form
+        Fu = inner((u - u0)/dt + grad(um)*um1, v)*dx - p1*div(v)*dx + nu*inner(grad(um), grad(v))*dx \
+            + d1*inner(grad(um)*um1, grad(v)*um1)*dx
+
+        # Continuity variational equation on residual form
+        Fp = d2*inner(grad(p), grad(q))*dx + div(um1)*q*dx
+
+    else:
+        d1 = 1.0/sqrt(1/dt**2 + u_mag**2/h**2)
+        d2 = h*u_mag
+
+        # Momentum variational equation on residual form
+        Fu = inner((u - u0)/dt + grad(um)*um1, v)*dx - p1*div(v)*dx + nu*inner(grad(um), grad(v))*dx \
+            + d1*inner((u - u0)/dt + grad(um)*um1 + grad(p1), grad(v)*um1)*dx + d2*div(um)*div(v)*dx 
+
+        # Continuity variational equation on residual form
+        Fp = d1*inner((u1 - u0)/dt + grad(um1)*um1 + grad(p), grad(q))*dx + div(um1)*q*dx 
 
     au = lhs(Fu)
     Lu = rhs(Fu)
 
-    # Continuity variational equation on residual form
-    Fp = d1*inner((u1 - u0)/dt + grad(um1)*um1 + grad(p), grad(q))*dx + div(um1)*q*dx 
     ap = lhs(Fp)
     Lp = rhs(Fp)
 
@@ -313,15 +327,16 @@ def simulate(U, nu, mesh, Tmax, uinit=None, pinit=None, tinit=0.0):
 # %% ====================================================================
 
 U = 1.0
-nu = 4.0e-4
+nu = 4.0e-5
 
-u1, p1, time, drag, lift, dt = simulate(U, nu, mesh, 2.0)
+u1, p1, time, drag, lift, dt = simulate(U, nu, mesh, 2.0, sds=False)
 plot(mesh, linewidth=0.1, color="k")
 plot(u1)
 plt.show()
 
-
-
+plot(mesh, linewidth=0.1, color="k")
+plot(p1)
+plt.show()
 
 # %%
 
@@ -333,9 +348,9 @@ time = time[time > tmin]
 sig = np.sign(lift - np.mean(lift))
 sc_pos = np.nonzero(sig[1:] != sig[:-1])[0][1:-1]
 nperiod = np.mean(sc_pos[2:] - sc_pos[1:-1])*2 #exclude first periods
-
 period = dt*nperiod
 f = 1/period
+
 plt.plot(time, lift, label="Lift")
 plt.plot(time, drag, label="Drag")
 plt.plot(time, np.sin(2*np.pi*f*time))
@@ -349,7 +364,12 @@ u1, p1, time2, drag2, lift2, dt = simulate(U, nu, mesh, 3.0, uinit=u1, pinit=p1,
 time = np.append(time, time2)
 lift = np.append(lift, lift2)
 drag = np.append(drag, drag2)
+plot(mesh, linewidth=0.1, color="k")
 plot(u1)
+plt.show()
+
+plot(mesh, linewidth=0.1, color="k")
+plot(p1)
 plt.show()
 
 # %%
@@ -359,8 +379,6 @@ St = f*L/U
 Re = U*L/nu
 print("Re = %.1f" % Re)
 print("St = %.3f" % St)
-# %%
-
 
 
 
